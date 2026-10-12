@@ -1,0 +1,13 @@
+.env
+node_modules/
+dist/
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+data/
+artifacts/
+*.pt
+*.nii
+*.nii.gz
+deploy/kubernetes/overlays/*/secrets.env
