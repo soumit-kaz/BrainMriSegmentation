@@ -1,0 +1,11 @@
+{
+  "include": ["backend"],
+  "exclude": ["**/__pycache__", "**/node_modules"],
+  "extraPaths": [
+    "backend/segmentation-core",
+    "backend/training-service",
+    "backend/inference-service"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "standard"
+}
