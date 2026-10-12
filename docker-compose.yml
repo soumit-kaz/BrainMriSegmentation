@@ -1,0 +1,125 @@
+name: glioma-segmentation
+
+x-segmentation-environment: &segmentation-environment
+  SEGMENTATION_DATASET_DIRECTORY: /data
+  SEGMENTATION_ARTIFACTS_DIRECTORY: /artifacts
+  SEGMENTATION_CACHE_DIRECTORY: /cache
+
+x-inference-environment: &inference-environment
+  INFERENCE_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-segmentation}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-segmentation}
+  INFERENCE_REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@redis:6379/0
+  INFERENCE_STORAGE_DIRECTORY: /storage
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-segmentation}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-segmentation}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  training-service:
+    build:
+      context: ./backend
+      dockerfile: training-service/Dockerfile
+    image: glioma-segmentation/training-service:1.0.0
+    environment: *segmentation-environment
+    volumes:
+      - ${DATASET_DIRECTORY:-./data}:/data:ro
+      - model-artifacts:/artifacts
+      - preprocessing-cache:/cache
+    shm_size: 8gb
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/api/training/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  inference-api:
+    build:
+      context: ./backend
+      dockerfile: inference-service/Dockerfile
+      target: api
+    image: glioma-segmentation/inference-api:1.0.0
+    environment: *inference-environment
+    volumes:
+      - inference-storage:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 2
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  inference-worker:
+    build:
+      context: ./backend
+      dockerfile: inference-service/Dockerfile
+      target: worker
+    image: glioma-segmentation/inference-worker:1.0.0
+    environment:
+      <<: [*inference-environment, *segmentation-environment]
+    volumes:
+      - inference-storage:/storage
+      - model-artifacts:/artifacts:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    stop_grace_period: 120s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('/tmp/inference-worker-heartbeat') < 120 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    image: glioma-segmentation/frontend:1.0.0
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"
+    depends_on:
+      - training-service
+      - inference-api
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  model-artifacts:
+  preprocessing-cache:
+  inference-storage:
