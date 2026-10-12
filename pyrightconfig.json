@@ -6,6 +6,6 @@
     "backend/training-service",
     "backend/inference-service"
   ],
-  "pythonVersion": "3.12",
+  "pythonVersion": "3.11",
   "typeCheckingMode": "standard"
 }

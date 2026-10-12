@@ -6,7 +6,7 @@ import queue
 from multiprocessing.context import SpawnProcess
 from multiprocessing.queues import Queue
 from multiprocessing.synchronize import Event
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from segmentation_core.runtime import set_random_seed
 from segmentation_core.settings import SegmentationSettings
@@ -25,7 +25,10 @@ from training_service.utils import get_utc_timestamp
 
 logger = logging.getLogger("segmentation.training")
 
-TrainingEventQueue = Queue[dict[str, Any]]
+if TYPE_CHECKING:
+    TrainingEventQueue: TypeAlias = Queue[dict[str, Any]]
+else:
+    TrainingEventQueue = Queue
 
 
 class QueueProgressReporter:
