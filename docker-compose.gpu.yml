@@ -1,0 +1,20 @@
+services:
+  training-service:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  inference-worker:
+    environment:
+      INFERENCE_GPU_MEMORY_FRACTION: "0.3"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

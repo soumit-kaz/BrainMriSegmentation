@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: glioma-segmentation
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: glioma-segmentation
+resources:
+  - namespace.yaml
+  - configuration.yaml
+  - storage.yaml
+  - postgres.yaml
+  - redis.yaml
+  - training-service.yaml
+  - inference-api.yaml
+  - inference-worker.yaml
+  - frontend.yaml
+  - ingress.yaml
+  - network-policies.yaml

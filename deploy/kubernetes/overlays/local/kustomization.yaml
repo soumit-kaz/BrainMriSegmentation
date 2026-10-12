@@ -1,0 +1,84 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - dataset-volume.yaml
+secretGenerator:
+  - name: segmentation-secrets
+    namespace: glioma-segmentation
+    envs:
+      - secrets.env
+    options:
+      disableNameSuffixHash: true
+patches:
+  - target:
+      kind: PersistentVolumeClaim
+    patch: |-
+      - op: replace
+        path: /spec/accessModes
+        value: [ReadWriteOnce]
+  - target:
+      kind: PersistentVolumeClaim
+      name: brats-dataset
+    patch: |-
+      - op: replace
+        path: /spec/accessModes
+        value: [ReadOnlyMany]
+      - op: add
+        path: /spec/storageClassName
+        value: ""
+      - op: add
+        path: /spec/volumeName
+        value: glioma-segmentation-brats-dataset
+  - target:
+      kind: Ingress
+      name: glioma-segmentation
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: glioma.localhost
+  - target:
+      kind: Deployment
+      name: training-service
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: "1"
+            memory: 4Gi
+          limits:
+            memory: 10Gi
+  - target:
+      kind: Deployment
+      name: inference-worker
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            memory: 6Gi
+  - target:
+      kind: ScaledObject
+      name: inference-worker
+    patch: |-
+      $patch: delete
+      apiVersion: keda.sh/v1alpha1
+      kind: ScaledObject
+      metadata:
+        name: inference-worker
+  - target:
+      kind: TriggerAuthentication
+      name: redis-authentication
+    patch: |-
+      $patch: delete
+      apiVersion: keda.sh/v1alpha1
+      kind: TriggerAuthentication
+      metadata:
+        name: redis-authentication

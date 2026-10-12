@@ -1,0 +1,132 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-worker
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inference-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: inference-worker
+    spec:
+      terminationGracePeriodSeconds: 180
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: inference-worker
+          image: glioma-segmentation/inference-worker:1.0.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: segmentation-configuration
+          env:
+            - name: INFERENCE_WORKER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: segmentation-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: segmentation-secrets
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: segmentation-secrets
+                  key: REDIS_PASSWORD
+            - name: INFERENCE_DATABASE_URL
+              value: postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)
+            - name: INFERENCE_REDIS_URL
+              value: redis://:$(REDIS_PASSWORD)@redis:6379/0
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('/tmp/inference-worker-heartbeat') < 120 else 1)"
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              memory: 8Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: inference-storage
+              mountPath: /storage
+            - name: model-artifacts
+              mountPath: /artifacts
+              readOnly: true
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: inference-storage
+          persistentVolumeClaim:
+            claimName: inference-storage
+        - name: model-artifacts
+          persistentVolumeClaim:
+            claimName: model-artifacts
+            readOnly: true
+        - name: temporary
+          emptyDir: {}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: redis-authentication
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: segmentation-secrets
+      key: REDIS_PASSWORD
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: inference-worker
+spec:
+  scaleTargetRef:
+    name: inference-worker
+  minReplicaCount: 0
+  maxReplicaCount: 1
+  pollingInterval: 10
+  cooldownPeriod: 600
+  triggers:
+    - type: redis-streams
+      metadata:
+        address: redis.glioma-segmentation.svc.cluster.local:6379
+        stream: segmentation-jobs
+        consumerGroup: segmentation-workers
+        lagCount: "1"
+        activationLagCount: "0"
+      authenticationRef:
+        name: redis-authentication
+    - type: redis-streams
+      metadata:
+        address: redis.glioma-segmentation.svc.cluster.local:6379
+        stream: segmentation-jobs
+        consumerGroup: segmentation-workers
+        pendingEntriesCount: "1"
+      authenticationRef:
+        name: redis-authentication
